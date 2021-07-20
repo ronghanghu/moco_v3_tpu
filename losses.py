@@ -16,7 +16,6 @@ class SimCLRLoss(nn.Module):
 
     Config params:
         temperature (float): the temperature to be applied on the logits
-        embedding_key (str): the key in sample_list that contains the embedding vectors.
     """
 
     def __init__(self, temperature=0.1):

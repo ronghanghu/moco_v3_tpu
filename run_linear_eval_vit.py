@@ -192,7 +192,7 @@ def train():
             optimizer.zero_grad()
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 output = model(data)
-                loss = loss_fn(output, target)
+                loss = loss_fn(output, target.to(device) if not is_xla() else target)
 
             # backward pass
             if scaler is not None:
