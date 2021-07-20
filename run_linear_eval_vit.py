@@ -256,6 +256,7 @@ def eval_on_val(val_loader, model, scaler, device):
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             output = model(data)
             pred = output.argmax(dim=-1)
+        target = target.to(device) if not is_xla() else target
         local_correct += pred.eq(target.view_as(pred)).sum()
         local_total += torch.tensor(target.size(0), device=device)
     correct = reduce_tensor(local_correct.float(), average=False).item()
