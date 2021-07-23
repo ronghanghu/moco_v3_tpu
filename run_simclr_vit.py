@@ -24,7 +24,7 @@ from distributed import (
     load_ckpt,
 )
 from schedulers import get_warmup_cosine_scheduler
-from transforms import ImgPilColorDistortion, ImgPilGaussianBlur, MultiViewGenerator
+from transforms import ImgPilGaussianBlur, MultiViewGenerator
 from utils import SmoothedValue
 
 
@@ -53,19 +53,18 @@ def load_training_data():
         return [None] * train_dataset_len, train_loader, train_sampler
 
     master_print(f"loading images from disk folder: {cfg.data_dir}")
-    simclr_transform = MultiViewGenerator(
-        T.Compose(
-            [
-                T.RandomResizedCrop(size=224),
-                T.RandomHorizontalFlip(p=0.5),
-                ImgPilColorDistortion(strength=0.5),
-                ImgPilGaussianBlur(p=0.5, radius_min=0.1, radius_max=2.0),
-                T.ToTensor(),
-                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        ),
-        n_views=2,
+    base_transform = T.Compose(
+        [
+            T.RandomResizedCrop(size=224),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomApply([T.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+            T.RandomGrayscale(p=0.2),
+            ImgPilGaussianBlur(p=0.5, radius_min=0.1, radius_max=2.0),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
     )
+    simclr_transform = MultiViewGenerator([base_transform] * 2)
     train_dataset = torchvision.datasets.ImageFolder(
         os.path.join(cfg.data_dir, "train"), simclr_transform
     )
@@ -85,6 +84,8 @@ def load_training_data():
         collate_fn=collate_fn,
         shuffle=False if train_sampler else True,
         num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     synchronize()
@@ -112,7 +113,10 @@ def train():
     assert batch_size % get_world_size() == 0
     train_dataset, train_loader, train_sampler = load_training_data()
     model = SimCLRViTModel(
-        cfg.vit_model_class, cfg.freeze_patch_embed, cfg.simclr_embed_dim
+        vit_model_class=cfg.vit_model_class,
+        vit_pos_embed_type=cfg.vit_pos_embed_type,
+        freeze_patch_embed=cfg.freeze_patch_embed,
+        simclr_embed_dim=cfg.simclr_embed_dim,
     )
     if is_xla():
         device = xm.xla_device()

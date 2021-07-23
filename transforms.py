@@ -1,32 +1,7 @@
 import random
 import numpy as np
 
-import torchvision.transforms as T
-from PIL import ImageFilter
-
-
-# adapted from
-# https://github.com/facebookresearch/vissl/blob/master/vissl/data/ssl_transforms/img_pil_color_distortion.py
-class ImgPilColorDistortion:
-    def __init__(self, strength):
-        """
-        Args:
-            strength (float): A number used to quantify the strength of the
-                              color distortion.
-        """
-        self.strength = strength
-        self.color_jitter = T.ColorJitter(
-            0.8 * self.strength,
-            0.8 * self.strength,
-            0.8 * self.strength,
-            0.2 * self.strength,
-        )
-        self.rnd_color_jitter = T.RandomApply([self.color_jitter], p=0.8)
-        self.rnd_gray = T.RandomGrayscale(p=0.2)
-        self.transforms = T.Compose([self.rnd_color_jitter, self.rnd_gray])
-
-    def __call__(self, image):
-        return self.transforms(image)
+from PIL import ImageFilter, ImageOps
 
 
 # adapted from
@@ -62,12 +37,34 @@ class ImgPilGaussianBlur:
         )
 
 
-class MultiViewGenerator(object):
-    """Take two random crops of one image as the query and key."""
+# adapted from
+# https://github.com/facebookresearch/vissl/blob/master/vissl/data/ssl_transforms/img_pil_random_solarize.py
+class ImgPilRandomSolarize:
+    """
+    Randomly apply solarization transform to an image.
+    This was used in BYOL - https://arxiv.org/abs/2006.07733
+    """
 
-    def __init__(self, base_transform, n_views=2):
-        self.base_transform = base_transform
-        self.n_views = n_views
+    def __init__(self, p):
+        """
+        Args:
+            p (float): Probability of applying the transform
+        """
+        self.prob = p
+
+    def __call__(self, img):
+        should_solarize = np.random.rand() <= self.prob
+        if not should_solarize:
+            return img
+
+        return ImageOps.solarize(img)
+
+
+class MultiViewGenerator:
+    """Take apply separate transforms to each crop."""
+
+    def __init__(self, base_transform_list):
+        self.base_transform_list = base_transform_list
 
     def __call__(self, x):
-        return [self.base_transform(x) for i in range(self.n_views)]
+        return [transform(x) for transform in self.base_transform_list]

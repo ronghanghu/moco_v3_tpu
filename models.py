@@ -1,3 +1,5 @@
+from itertools import chain
+
 import timm
 import torch
 from torch import nn
@@ -6,7 +8,7 @@ from distributed import is_xla
 from xla_sync_bn import XLASyncBNTrainModeOnly
 
 
-class SimCLRProjectionHead(nn.Module):
+class ProjectionHead(nn.Module):
     def __init__(self, input_dim, output_dim, hidden_dim=4096):
         super().__init__()
         # a 3-layer projection head based on MoCo V3 paper in
@@ -20,7 +22,34 @@ class SimCLRProjectionHead(nn.Module):
             bn_class(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, output_dim),
+            bn_class(output_dim),
         ]
+        # use only gamma but not beta in the last BN layer
+        nn.init.zeros_(layers[-1].bias)
+        layers[-1].bias.requires_grad = False
+        self.clf = nn.Sequential(*layers)
+
+    def forward(self, batch):
+        out = self.clf(batch)
+        return out
+
+
+class PredictionHead(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=4096):
+        super().__init__()
+        # a 2-layer prediction head based on MoCo V3 paper in
+        # https://arxiv.org/abs/2104.02057
+        bn_class = XLASyncBNTrainModeOnly if is_xla() else nn.SyncBatchNorm
+        layers = [
+            nn.Linear(input_dim, hidden_dim),
+            bn_class(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, output_dim),
+            bn_class(output_dim),
+        ]
+        # use only gamma but not beta in the last BN layer
+        nn.init.zeros_(layers[-1].bias)
+        layers[-1].bias.requires_grad = False
         self.clf = nn.Sequential(*layers)
 
     def forward(self, batch):
@@ -29,10 +58,13 @@ class SimCLRProjectionHead(nn.Module):
 
 
 class SimCLRViTModel(nn.Module):
-    def __init__(self, vit_model_class, freeze_patch_embed, simclr_embed_dim):
+    def __init__(
+        self, vit_model_class, vit_pos_embed_type, freeze_patch_embed, simclr_embed_dim
+    ):
         super().__init__()
         vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
         vit_trunk.head = nn.Identity()  # remove the classifier layer
+        init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
         if freeze_patch_embed:
             # freezing ViT patch embedding as in MoCo V3 to improve stability
             for p in vit_trunk.patch_embed.parameters():
@@ -40,7 +72,7 @@ class SimCLRViTModel(nn.Module):
         vit_hidden_dim = vit_trunk.cls_token.size(-1)
 
         self.trunk = vit_trunk
-        self.ssl_head = SimCLRProjectionHead(vit_hidden_dim, simclr_embed_dim)
+        self.ssl_head = ProjectionHead(vit_hidden_dim, simclr_embed_dim)
 
     def forward(self, images):
         features = self.trunk.forward_features(images)
@@ -48,11 +80,68 @@ class SimCLRViTModel(nn.Module):
         return simclr_embeddings
 
 
-class LinearEvalViTModel(nn.Module):
-    def __init__(self, vit_model_class, num_classes):
+class MoCoV3ViTModel(nn.Module):
+    def __init__(
+        self, vit_model_class, vit_pos_embed_type, freeze_patch_embed, mocov3_embed_dim
+    ):
         super().__init__()
         vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
         vit_trunk.head = nn.Identity()  # remove the classifier layer
+        init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
+        if freeze_patch_embed:
+            # freezing ViT patch embedding as in MoCo V3 to improve stability
+            for p in vit_trunk.patch_embed.parameters():
+                p.requires_grad = False
+        vit_hidden_dim = vit_trunk.cls_token.size(-1)
+
+        self.trunk = vit_trunk
+        self.proj_head = ProjectionHead(vit_hidden_dim, mocov3_embed_dim)
+        self.pred_head = PredictionHead(mocov3_embed_dim, mocov3_embed_dim)
+
+        # a momentum copy of the trunk and the projection head
+        vit_trunk_m = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk_m.head = nn.Identity()  # remove the classifier layer
+        init_vit_and_pos_embedding(vit_trunk_m, vit_pos_embed_type)
+        self.trunk_m = vit_trunk_m
+        self.proj_head_m = ProjectionHead(vit_hidden_dim, mocov3_embed_dim)
+        # initialize the momentum copies from the same parameter
+        self.trunk_m.load_state_dict(self.trunk.state_dict())
+        self.proj_head_m.load_state_dict(self.proj_head.state_dict())
+        for p in chain(self.trunk_m.parameters(), self.proj_head_m.parameters()):
+            p.requires_grad = False
+
+    def _f_q(self, images):
+        features = self.trunk.forward_features(images)
+        embeddings = self.pred_head(self.proj_head(features))
+        return embeddings
+
+    def _f_k(self, images):
+        with torch.no_grad():
+            features = self.trunk_m.forward_features(images)
+            embeddings = self.proj_head_m(features)
+        return embeddings
+
+    def forward(self, images):
+        # Algorithm 1 in https://arxiv.org/abs/2104.02057
+        images = images.view(2, images.shape[0] // 2, *images.shape[1:])
+        x1, x2 = images[0], images[1]  # two augmented views
+        q1, q2 = self._f_q(x1), self._f_q(x2)
+        k1, k2 = self._f_k(x1), self._f_k(x2)
+        return q1, q2, k1, k2
+
+    def update_momentum_params(self, momentum):
+        for p, p_m in zip(self.trunk.parameters(), self.trunk_m.parameters()):
+            p_m.data.mul_(momentum).add_(p.data, alpha=1.0 - momentum)
+        for p, p_m in zip(self.proj_head.parameters(), self.proj_head_m.parameters()):
+            p_m.data.mul_(momentum).add_(p.data, alpha=1.0 - momentum)
+
+
+class LinearEvalViTModel(nn.Module):
+    def __init__(self, vit_model_class, vit_pos_embed_type, num_classes):
+        super().__init__()
+        vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk.head = nn.Identity()  # remove the classifier layer
+        init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
         # freezing the trunk for linear evaluation
         for p in vit_trunk.parameters():
             p.requires_grad = False
@@ -86,3 +175,54 @@ class LinearEvalViTModel(nn.Module):
             features = self.trunk.forward_features(images)
         logits = self.classifier_head(features)
         return logits
+
+
+# adapted from https://github.com/facebookresearch/moco-v3/blob/main/vits.py
+def init_vit_and_pos_embedding(trunk, vit_pos_embed_type, temperature=10000.0):
+    import math
+    from functools import reduce
+    from operator import mul
+
+    for name, m in trunk.named_modules():
+        if isinstance(m, nn.Linear):
+            if "qkv" in name:
+                # Treat the weights of Q, K, V separately
+                val = math.sqrt(6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
+                nn.init.uniform_(m.weight, -val, val)
+            else:
+                nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+    nn.init.normal_(trunk.cls_token, std=1e-6)
+
+    assert vit_pos_embed_type in ["sin-cos", "learned"]
+    if vit_pos_embed_type == "learned":
+        # the timm ViT is already built with learnable position embedding
+        return
+
+    # initialize the path embedding scale according to patch size
+    val = math.sqrt(
+        6.0 / float(3 * reduce(mul, trunk.patch_embed.patch_size, 1) + trunk.embed_dim)
+    )
+    nn.init.uniform_(trunk.patch_embed.proj.weight, -val, val)
+    nn.init.zeros_(trunk.patch_embed.proj.bias)
+
+    h, w = trunk.patch_embed.grid_size
+    grid_w = torch.arange(w, dtype=torch.float32)
+    grid_h = torch.arange(h, dtype=torch.float32)
+    grid_w, grid_h = torch.meshgrid(grid_w, grid_h)
+    assert (
+        trunk.embed_dim % 4 == 0
+    ), "Embed dimension must be divisible by 4 for 2D sin-cos position embedding"
+    pos_dim = trunk.embed_dim // 4
+    omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
+    omega = 1.0 / (temperature ** omega)
+    out_w = torch.einsum("m,d->md", [grid_w.flatten(), omega])
+    out_h = torch.einsum("m,d->md", [grid_h.flatten(), omega])
+    pos_emb = torch.cat(
+        [torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1
+    )[None, :, :]
+
+    assert trunk.num_tokens == 1, "Assuming one and only one token, [CLS]"
+    pe_token = torch.zeros([1, 1, trunk.embed_dim], dtype=torch.float32)
+    trunk.pos_embed = nn.Parameter(torch.cat([pe_token, pos_emb], dim=1))
+    trunk.pos_embed.requires_grad = False

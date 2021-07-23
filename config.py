@@ -13,7 +13,7 @@ cfg.device = "cuda"  # "xla" or "cuda"
 cfg.log_step_interval = 100
 cfg.ckpt_epoch_interval = 15
 cfg.ckpt_dir = "./save"  # make sure it can be accessed from all nodes
-cfg.ckpt_prefix = "simclr_vit"
+cfg.ckpt_prefix = "vit_b16"
 
 cfg.resume_training = True
 cfg.resume_ckpt_path = "<auto-resume-latest>"
@@ -34,9 +34,13 @@ cfg.num_workers = 4
 # see https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
 # for a list of ViT model classes
 cfg.vit_model_class = "vit_base_patch16_224"
+cfg.vit_pos_embed_type = "sin-cos"  # "sin-cos" or "learned"
 cfg.freeze_patch_embed = True
 cfg.simclr_embed_dim = 256
 cfg.simclr_loss_temperature = 0.1
+cfg.mocov3_embed_dim = 256
+cfg.mocov3_loss_temperature = 0.2
+cfg.mocov3_momentum = 0.99
 
 # --------------------------------------------------------------------------- #
 # training options

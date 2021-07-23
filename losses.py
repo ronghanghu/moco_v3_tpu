@@ -55,3 +55,39 @@ class SimCLRLoss(nn.Module):
         loss_b = F.cross_entropy(torch.cat([logits_ba, logits_bb], dim=1), self.labels)
         loss = (loss_a + loss_b) / 2  # divide by 2 to average over all samples
         return loss
+
+
+class MoCoV3Loss(nn.Module):
+    """
+    This is the MoCoV3 loss in https://arxiv.org/abs/2104.02057
+
+    Config params:
+        temperature (float): the temperature to be applied on the logits
+    """
+
+    def __init__(self, temperature=0.2):
+        super().__init__()
+        self.tau = temperature
+        self.labels = None
+        self.last_local_batch_size = None
+
+    def _ctr(self, q, k):
+        local_batch_size = q.size(0)
+        if local_batch_size != self.last_local_batch_size:
+            self.labels = local_batch_size * get_rank() + torch.arange(
+                local_batch_size, device=q.device
+            )
+            self.last_local_batch_size = local_batch_size
+
+        with torch.no_grad():
+            k_transpose = gather_tensor_with_backward(k).transpose(0, 1)
+        logits = torch.matmul(q, k_transpose) / self.tau
+        return (2 * self.tau) * F.cross_entropy(logits, self.labels)
+
+    def forward(self, mocov3_output):
+        q1, q2, k1, k2 = mocov3_output
+        q1 = F.normalize(q1, dim=-1, p=2)
+        q2 = F.normalize(q2, dim=-1, p=2)
+        k1 = F.normalize(k1, dim=-1, p=2)
+        k2 = F.normalize(k2, dim=-1, p=2)
+        return self._ctr(q1, k2) + self._ctr(q2, k1)

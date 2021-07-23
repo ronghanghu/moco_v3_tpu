@@ -7,7 +7,8 @@ import torchvision
 import torchvision.transforms as T
 
 import config
-from models import LinearEvalViTModel
+from losses import MoCoV3Loss
+from models import MoCoV3ViTModel
 from distributed import (
     get_world_size,
     get_rank,
@@ -23,6 +24,7 @@ from distributed import (
     load_ckpt,
 )
 from schedulers import get_warmup_cosine_scheduler
+from transforms import ImgPilGaussianBlur, ImgPilRandomSolarize, MultiViewGenerator
 from utils import SmoothedValue
 
 
@@ -37,29 +39,49 @@ except ImportError:
 
 def load_training_data():
     world_size = get_world_size()
-    local_batch_size = cfg.linear_eval.batch_size // world_size
+    local_batch_size = cfg.batch_size // world_size
+    if cfg.fake_data:
+        train_dataset_len = 1281167  # Exactly the size of Imagenet dataset.
+        train_loader = xu.SampleGenerator(
+            data=(
+                torch.zeros(2 * local_batch_size, 3, 224, 224),
+                torch.zeros(local_batch_size, dtype=torch.int64),
+            ),
+            sample_count=train_dataset_len // local_batch_size // world_size,
+        )
+        train_sampler = None
+        return [None] * train_dataset_len, train_loader, train_sampler
 
     master_print(f"loading images from disk folder: {cfg.data_dir}")
-    train_transform = T.Compose(
+    # data augmentation following BYOL in https://arxiv.org/abs/2006.07733
+    base_transform_1 = T.Compose(
         [
             T.RandomResizedCrop(size=224),
-            T.RandomHorizontalFlip(),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomApply([T.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            T.RandomGrayscale(p=0.2),
+            ImgPilGaussianBlur(p=1.0, radius_min=0.1, radius_max=2.0),
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
-    val_transform = T.Compose(
+    base_transform_2 = T.Compose(
         [
-            T.Resize(size=256),
-            T.CenterCrop(size=224),
+            T.RandomResizedCrop(size=224),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomApply([T.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            T.RandomGrayscale(p=0.2),
+            ImgPilGaussianBlur(p=0.1, radius_min=0.1, radius_max=2.0),
+            ImgPilRandomSolarize(p=0.2),
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
+    )
+    mocov3_transform = MultiViewGenerator([base_transform_1, base_transform_2])
+    train_dataset = torchvision.datasets.ImageFolder(
+        os.path.join(cfg.data_dir, "train"), mocov3_transform
     )
 
-    train_dataset = torchvision.datasets.ImageFolder(
-        os.path.join(cfg.data_dir, "train"), train_transform
-    )
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset,
         num_replicas=world_size,
@@ -72,28 +94,8 @@ def load_training_data():
         batch_size=local_batch_size,
         sampler=train_sampler,
         drop_last=cfg.drop_last,
+        collate_fn=collate_fn,
         shuffle=False if train_sampler else True,
-        num_workers=cfg.num_workers,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-
-    val_dataset = torchvision.datasets.ImageFolder(
-        os.path.join(cfg.data_dir, "val"), val_transform
-    )
-    val_sampler = torch.utils.data.distributed.DistributedSampler(
-        val_dataset,
-        num_replicas=world_size,
-        rank=get_rank(),
-        drop_last=cfg.drop_last,
-        shuffle=False,
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=local_batch_size,
-        sampler=val_sampler,
-        drop_last=cfg.drop_last,
-        shuffle=False,
         num_workers=cfg.num_workers,
         pin_memory=True,
         persistent_workers=True,
@@ -102,35 +104,36 @@ def load_training_data():
     synchronize()
     master_print("data loading done!")
 
-    return (
-        train_dataset,
-        train_loader,
-        train_sampler,
-        val_dataset,
-        val_loader,
-        val_sampler,
-    )
+    return train_dataset, train_loader, train_sampler
+
+
+def collate_fn(multi_view_img_list):
+    """
+    For N images with 2 views, it returns (2*N, C, H, W) shape, arranged as
+    [img_1_view_1, ..., img_N_view_1, img_1_view_1, ..., img_N_view_1]
+    and can be reshaped to (2, N, C, H, W) for loss computation
+    """
+    img_list = []
+    for n_view in range(2):
+        img_list.extend(views[n_view] for views, _ in multi_view_img_list)
+    label_list = [label for _, label in multi_view_img_list]
+    return torch.stack(img_list), torch.tensor(label_list, dtype=torch.long)
 
 
 def train():
-    batch_size = cfg.linear_eval.batch_size
-    num_epochs = cfg.linear_eval.num_epochs
+    batch_size = cfg.batch_size
+    num_epochs = cfg.num_epochs
     assert batch_size % get_world_size() == 0
-    train_dataset, train_loader, train_sampler, _, val_loader, _ = load_training_data()
-    model = LinearEvalViTModel(
+    train_dataset, train_loader, train_sampler = load_training_data()
+    model = MoCoV3ViTModel(
         vit_model_class=cfg.vit_model_class,
         vit_pos_embed_type=cfg.vit_pos_embed_type,
-        num_classes=cfg.linear_eval.num_classes,
-    )
-    master_print(f"linear evaluation for: {cfg.linear_eval.pretrained_ckpt_path}")
-    model.load_from_pretrained_checkpoint(
-        cfg.linear_eval.pretrained_ckpt_path,
-        reset_last_ln=cfg.linear_eval.reset_last_ln,
+        freeze_patch_embed=cfg.freeze_patch_embed,
+        mocov3_embed_dim=cfg.mocov3_embed_dim,
     )
     if is_xla():
         device = xm.xla_device()
         train_loader = pl.MpDeviceLoader(train_loader, device)
-        val_loader = pl.MpDeviceLoader(val_loader, device)
         model = model.to(device)
         broadcast_xla_master_model_param(model)
     else:
@@ -140,19 +143,19 @@ def train():
             model, device_ids=[cfg.device_id], output_device=cfg.device_id
         )
 
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=cfg.linear_eval.lr,
-        momentum=cfg.linear_eval.momentum,
-        weight_decay=cfg.linear_eval.weight_decay,
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
     )
+    iters_per_epoch = len(train_dataset) / batch_size
     lr_scheduler = get_warmup_cosine_scheduler(
-        optimizer, 100, len(train_dataset) * num_epochs // batch_size
+        optimizer,
+        warmup_iteration=int(iters_per_epoch * cfg.warmup_epochs),
+        max_iteration=int(iters_per_epoch * num_epochs),
     )
     scaler = None
     if cfg.use_pytorch_amp:
         scaler = torch.cuda.amp.GradScaler()
-    loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn = MoCoV3Loss(temperature=cfg.mocov3_loss_temperature)
     if is_master():
         os.makedirs(cfg.ckpt_dir, exist_ok=True)
     master_print("\nmodel:")
@@ -164,7 +167,7 @@ def train():
             # find the lastest checkpoint file
             for e in range(1, num_epochs + 1):
                 try_path = os.path.join(
-                    cfg.ckpt_dir, f"{cfg.ckpt_prefix}_LEepoch_{e}.ckpt"
+                    cfg.ckpt_dir, f"{cfg.ckpt_prefix}_epoch_{e}.ckpt"
                 )
                 if os.path.exists(try_path):
                     resume_ckpt_path = try_path
@@ -174,16 +177,12 @@ def train():
     if resume_ckpt_path is not None:
         meta_data = load_ckpt(resume_ckpt_path, model, optimizer, lr_scheduler, scaler)
         last_ckpt_epoch = meta_data["epoch"]
-        best_accuracy = meta_data["best_accuracy"]
-        best_epoch = meta_data["best_epoch"]
     else:
         last_ckpt_epoch = 0
-        best_accuracy = 0.0
-        best_epoch = 0
 
     synchronize()
     smoothed_loss = SmoothedValue(window_size=20)
-    model.eval()  # use eval mode for linear evaluation training
+    model.train()
 
     master_print(
         "training begins (note that the first few XLA iterations "
@@ -200,7 +199,7 @@ def train():
             optimizer.zero_grad()
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 output = model(data)
-                loss = loss_fn(output, target.to(device) if not is_xla() else target)
+                loss = loss_fn(output)
 
             # backward pass
             if scaler is not None:
@@ -218,6 +217,11 @@ def train():
             else:
                 optimizer.step()
             lr_scheduler.step()
+            # momemtum param update
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                model.module.update_momentum_params(cfg.mocov3_momentum)
+            else:
+                model.update_momentum_params(cfg.mocov3_momentum)
 
             if (step + 1) % cfg.log_step_interval == 0:
                 lr = optimizer.param_groups[0]["lr"]
@@ -233,44 +237,14 @@ def train():
         time_elapsed = time.time() - time_b
         master_print(f"epoch {epoch} done ({time_elapsed:.2f} sec)")
 
-        if epoch % cfg.linear_eval.test_epoch_interval == 0 or epoch == num_epochs:
-            accuracy, _, _ = eval_on_val(val_loader, model, scaler, device)
-            if accuracy > best_accuracy:
-                best_accuracy = accuracy
-                best_epoch = epoch
-            master_print(
-                f"accuracy on val: {accuracy:.4f} "
-                f"(best accuracy {best_accuracy:.4f} at epoch {best_epoch})"
-            )
-        if epoch % cfg.linear_eval.ckpt_epoch_interval == 0 or epoch == num_epochs:
+        if epoch % cfg.ckpt_epoch_interval == 0 or epoch == num_epochs:
             ckpt_path = os.path.join(
-                cfg.ckpt_dir, f"{cfg.ckpt_prefix}_LEepoch_{epoch}.ckpt"
+                cfg.ckpt_dir, f"{cfg.ckpt_prefix}_epoch_{epoch}.ckpt"
             )
-            meta_data = {
-                "cfg": cfg,
-                "epoch": epoch,
-                "best_accuracy": best_accuracy,
-                "best_epoch": best_epoch,
-            }
+            meta_data = {"cfg": cfg, "epoch": epoch}
             save_ckpt(ckpt_path, model, optimizer, lr_scheduler, scaler, meta_data)
 
     master_print("training completed")
-
-
-def eval_on_val(val_loader, model, scaler, device):
-    local_correct = torch.tensor(0, device=device)
-    local_total = torch.tensor(0, device=device)
-    for data, target in val_loader:
-        with torch.cuda.amp.autocast(enabled=scaler is not None):
-            output = model(data)
-            pred = output.argmax(dim=-1)
-        target = target.to(device) if not is_xla() else target
-        local_correct += pred.eq(target.view_as(pred)).sum()
-        local_total += torch.tensor(target.size(0), device=device)
-    correct = reduce_tensor(local_correct.float(), average=False).item()
-    total = reduce_tensor(local_total.float(), average=False).item()
-    accuracy = correct / total
-    return accuracy, correct, total
 
 
 def main(device_id, configuration):
