@@ -41,6 +41,7 @@ cfg.simclr_loss_temperature = 0.1
 cfg.mocov3_embed_dim = 256
 cfg.mocov3_loss_temperature = 0.2
 cfg.mocov3_momentum = 0.99
+cfg.mocov3_use_cosine_momentum = True
 
 # --------------------------------------------------------------------------- #
 # training options

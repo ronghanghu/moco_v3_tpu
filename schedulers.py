@@ -14,3 +14,14 @@ def get_warmup_cosine_scheduler(optimizer, warmup_iteration, max_iteration):
         return lr_ratio
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, _warmup_cosine)
+
+
+# adapted from
+# https://github.com/facebookresearch/moco-v3/blob/main/main_moco.py
+def get_cosine_momentum(base_momentum, epoch, max_epoch):
+    """
+    note that epoch starts from 1
+    """
+    where = (epoch - 1) / max_epoch
+    momentum = 1 - 0.5 * (1 + math.cos(math.pi * where)) * (1 - base_momentum)
+    return momentum

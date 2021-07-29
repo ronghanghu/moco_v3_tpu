@@ -23,7 +23,7 @@ from distributed import (
     save_ckpt,
     load_ckpt,
 )
-from schedulers import get_warmup_cosine_scheduler
+from schedulers import get_warmup_cosine_scheduler, get_cosine_momentum
 from transforms import ImgPilGaussianBlur, ImgPilRandomSolarize, MultiViewGenerator
 from utils import SmoothedValue
 
@@ -188,6 +188,10 @@ def train():
         master_print(f"starting epoch {epoch}")
         time_b = time.time()
 
+        momentum = cfg.mocov3_momentum
+        if cfg.mocov3_use_cosine_momentum:
+            momentum = get_cosine_momentum(cfg.mocov3_momentum, epoch, num_epochs)
+            master_print(f"MoCo v3 momentum in this epoch: {momentum:.8f}")
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
         for step, data in enumerate(train_loader):
@@ -215,9 +219,9 @@ def train():
             lr_scheduler.step()
             # momemtum param update
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                model.module.update_momentum_params(cfg.mocov3_momentum)
+                model.module.update_momentum_params(momentum)
             else:
-                model.update_momentum_params(cfg.mocov3_momentum)
+                model.update_momentum_params(momentum)
 
             if (step + 1) % cfg.log_step_interval == 0:
                 lr = optimizer.param_groups[0]["lr"]
