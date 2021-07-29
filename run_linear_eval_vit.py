@@ -74,6 +74,8 @@ def load_training_data():
         drop_last=cfg.drop_last,
         shuffle=False if train_sampler else True,
         num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     val_dataset = torchvision.datasets.ImageFolder(
@@ -93,6 +95,8 @@ def load_training_data():
         drop_last=cfg.drop_last,
         shuffle=False,
         num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     synchronize()

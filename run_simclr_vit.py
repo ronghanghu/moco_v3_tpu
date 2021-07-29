@@ -85,6 +85,8 @@ def load_training_data():
         collate_fn=collate_fn,
         shuffle=False if train_sampler else True,
         num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     synchronize()

@@ -29,3 +29,5 @@ eggs/
 *.so
 *-checkpoint.ipynb
 !tests/data
+events.*
+*.pb
