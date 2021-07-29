@@ -115,3 +115,29 @@ python3 $(realpath run_linear_eval_vit.py) \
   data_dir=/checkpoint/ronghanghu/megavlt_paths/imagenet-1k \
   linear_eval.pretrained_ckpt_path=$PRETRAINED_MODEL
 ```
+
+## TPU profiling with XLA profiler
+
+Following [PyTorch XLA performance profiling](https://cloud.google.com/tpu/docs/pytorch-xla-performance-profiling-tpu-vm), on a TPU VM node, one can first start a tensorboard session with `tensorboard --logdir .` and launch the training scripts below. After the training starts for a while (e.g. after 100 steps when the speed becomes stable), capture the profile from `localhost:3294` in the Profile tab of tensorboard.
+
+Run profiling with fake data (no actual data loading) on a single VM node w/ 8 TPU cores:
+```
+export PT_XLA_DEBUG=1
+export XLA_HLO_DEBUG=1
+
+python3 run_simclr_vit_profiler.py \
+  device=xla \
+  fake_data=True \
+  batch_size=128 lr=0.0  # zero lr to avoid divergence
+```
+
+Run profiling with real data on a single VM node w/ 8 TPU cores:
+```
+export PT_XLA_DEBUG=1
+export XLA_HLO_DEBUG=1
+
+python3 run_simclr_vit_profiler.py \
+  device=xla \
+  data_dir=/checkpoint/ronghanghu/megavlt_paths/imagenet-1k \
+  batch_size=128 lr=0.0  # zero lr to avoid divergence
+```
