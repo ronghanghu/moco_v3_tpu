@@ -43,10 +43,7 @@ def load_training_data():
     if cfg.fake_data:
         train_dataset_len = 1281167  # Exactly the size of Imagenet dataset.
         train_loader = xu.SampleGenerator(
-            data=(
-                torch.zeros(2 * local_batch_size, 3, 224, 224),
-                torch.zeros(local_batch_size, dtype=torch.int64),
-            ),
+            data=torch.zeros(2 * local_batch_size, 3, 224, 224),
             sample_count=train_dataset_len // local_batch_size // world_size,
         )
         train_sampler = None
@@ -103,8 +100,7 @@ def collate_fn(multi_view_img_list):
     img_list = []
     for n_view in range(2):
         img_list.extend(views[n_view] for views, _ in multi_view_img_list)
-    label_list = [label for _, label in multi_view_img_list]
-    return torch.stack(img_list), torch.tensor(label_list, dtype=torch.long)
+    return torch.stack(img_list)
 
 
 def train():
@@ -181,7 +177,7 @@ def train():
 
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
-        for step, (data, target) in enumerate(train_loader):
+        for step, data in enumerate(train_loader):
             # forward pass
             optimizer.zero_grad()
             with torch.cuda.amp.autocast(enabled=scaler is not None):
@@ -208,7 +204,7 @@ def train():
             if (step + 1) % cfg.log_step_interval == 0:
                 lr = optimizer.param_groups[0]["lr"]
                 reduced_loss = reduce_tensor(loss, average=True).item()
-                smoothed_loss.update(reduced_loss, batch_size=target.size(0))
+                smoothed_loss.update(reduced_loss, batch_size=cfg.batch_size)
                 master_print(
                     f"epoch {epoch} step {(step + 1)}, lr: {lr:.4f}, "
                     f"loss: {reduced_loss:.4f}, "

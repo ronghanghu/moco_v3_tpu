@@ -110,23 +110,30 @@ class MoCoV3ViTModel(nn.Module):
         for p in chain(self.trunk_m.parameters(), self.proj_head_m.parameters()):
             p.requires_grad = False
 
-    def _f_q(self, images):
-        features = self.trunk.forward_features(images)
-        embeddings = self.pred_head(self.proj_head(features))
-        return embeddings
+    def _f_q_trunk(self, images):
+        return self.trunk.forward_features(images)
 
-    def _f_k(self, images):
+    def _f_k_trunk(self, images):
         with torch.no_grad():
-            features = self.trunk_m.forward_features(images)
-            embeddings = self.proj_head_m(features)
-        return embeddings
+            return self.trunk_m.forward_features(images)
+
+    def _f_q_head(self, features):
+        return self.pred_head(self.proj_head(features))
+
+    def _f_k_head(self, features):
+        with torch.no_grad():
+            return self.proj_head_m(features)
 
     def forward(self, images):
-        # Algorithm 1 in https://arxiv.org/abs/2104.02057
-        images = images.view(2, images.shape[0] // 2, *images.shape[1:])
-        x1, x2 = images[0], images[1]  # two augmented views
-        q1, q2 = self._f_q(x1), self._f_q(x2)
-        k1, k2 = self._f_k(x1), self._f_k(x2)
+        q_feat = self._f_q_trunk(images)
+        k_feat = self._f_k_trunk(images)
+
+        # separately forward the two augmentations through the heads so that BNs are
+        # applied separately (see appendix of https://arxiv.org/abs/2104.02057)
+        q_feat = q_feat.view(2, q_feat.shape[0] // 2, q_feat.shape[1])
+        q1, q2 = self._f_q_head(q_feat[0]), self._f_q_head(q_feat[1])
+        k_feat = k_feat.view(2, k_feat.shape[0] // 2, k_feat.shape[1])
+        k1, k2 = self._f_k_head(k_feat[0]), self._f_k_head(k_feat[1])
         return q1, q2, k1, k2
 
     def update_momentum_params(self, momentum):
