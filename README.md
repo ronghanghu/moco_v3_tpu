@@ -141,3 +141,14 @@ python3 run_simclr_vit_profiler.py \
   data_dir=/checkpoint/ronghanghu/megavlt_paths/imagenet-1k \
   batch_size=128 lr=0.0  # zero lr to avoid divergence
 ```
+
+Run profiling with fake data **but using PyTorch dataloader** on a single VM node w/ 8 TPU cores:
+```
+export PT_XLA_DEBUG=1
+export XLA_HLO_DEBUG=1
+
+python3 run_simclr_vit_profiler_fakewithdataloader.py \
+  device=xla \
+  fake_data=True \
+  batch_size=128 lr=0.0  # zero lr to avoid divergence
+```
