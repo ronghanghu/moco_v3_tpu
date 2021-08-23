@@ -10,9 +10,11 @@ def convert_to_deit(input_file, output_file):
 
     old_ckpt = torch.load(input_file, map_location="cpu")["model"]
     new_ckpt = OrderedDict()
-    for k in old_ckpt.keys():
-        if k.startswith('module.trunk.'):
-            new_ckpt[k[len('module.trunk.'):]] = old_ckpt[k]
+    for k in old_ckpt:
+        if k.startswith("module.trunk."):
+            new_ckpt[k[len("module.trunk.") :]] = old_ckpt[k]
+        elif k.startswith("trunk."):
+            new_ckpt[k[len("trunk.") :]] = old_ckpt[k]
     torch.save(new_ckpt, output_file)
     print(
         f"converted MoCo v3 checkpoint\n\t{input_file}\nto DeiT model\n\t{output_file}"

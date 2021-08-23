@@ -12,12 +12,12 @@ from models import SimCLRViTModel
 from distributed import (
     get_world_size,
     get_rank,
-    is_master,
     is_xla,
     broadcast_xla_master_model_param,
     infer_init_method,
     distributed_init,
     master_print,
+    setup_logging,
     synchronize,
     reduce_tensor,
     save_ckpt,
@@ -139,10 +139,7 @@ def train():
     if cfg.use_pytorch_amp:
         scaler = torch.cuda.amp.GradScaler()
     loss_fn = SimCLRLoss(temperature=cfg.simclr_loss_temperature)
-    if is_master():
-        os.makedirs(cfg.ckpt_dir, exist_ok=True)
-    master_print("\nmodel:")
-    master_print(model, end="\n\n")
+    master_print(f"\nmodel:\n{pprint.pformat(model)}\n")
 
     resume_ckpt_path = None
     if cfg.resume_training:
@@ -228,12 +225,12 @@ def train():
 def main(device_id, configuration):
     config.cfg = configuration
     distributed_init(configuration, device_id)
+    setup_logging(configuration, "simclr_vit")
     global cfg
     cfg = configuration
 
     synchronize()
-    master_print("\nconfig:")
-    master_print(pprint.pformat(cfg), end="\n\n")
+    master_print(f"\nconfig:\n{pprint.pformat(cfg)}\n")
     train()
 
 

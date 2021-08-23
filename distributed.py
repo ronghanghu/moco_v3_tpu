@@ -1,4 +1,5 @@
 import os
+import logging
 import subprocess
 import socket
 from itertools import chain
@@ -11,6 +12,9 @@ try:
     import torch_xla.core.xla_model as xm
 except ImportError:
     xm = None
+
+
+logger = None
 
 
 class XLAGatherLayer(torch.autograd.Function):
@@ -105,10 +109,12 @@ def is_xla():
     return cfg.device == "xla"
 
 
-def master_print(*args, **kwargs):
-    flush = kwargs.pop("flush", True)
+def master_print(message):
     if is_master():
-        print(*args, **kwargs, flush=flush)
+        if logger is not None:
+            logger.info(message)
+        else:
+            print(message, flush=True)
 
 
 def reduce_tensor(t, average=False):
@@ -223,6 +229,22 @@ def infer_init_method(cfg):
             cfg.no_spawn = False
             os.environ["MASTER_ADDR"] = "localhost"
             os.environ["MASTER_PORT"] = cfg.port
+
+
+def setup_logging(cfg, logging_name):
+    import sys
+
+    global logger
+    if is_master():
+        logger = logging.getLogger(logging_name)
+        logger.setLevel(logging.INFO)
+        os.makedirs(cfg.ckpt_dir, exist_ok=True)
+        fh = logging.FileHandler(os.path.join(cfg.ckpt_dir, f"{logging_name}.log"))
+        fh.setLevel(logging.INFO)
+        logger.addHandler(fh)
+        sh = logging.StreamHandler(stream=sys.stdout)
+        fh.setLevel(logging.INFO)
+        logger.addHandler(sh)
 
 
 def distributed_init(cfg, device_id):
