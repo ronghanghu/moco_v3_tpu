@@ -15,7 +15,7 @@ def convert_to_deit(input_file, output_file):
             new_ckpt[k[len("module.trunk.") :]] = old_ckpt[k]
         elif k.startswith("trunk."):
             new_ckpt[k[len("trunk.") :]] = old_ckpt[k]
-    torch.save(new_ckpt, output_file)
+    torch.save({"model": new_ckpt}, output_file)
     print(
         f"converted MoCo v3 checkpoint\n\t{input_file}\nto DeiT model\n\t{output_file}"
     )
