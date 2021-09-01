@@ -105,7 +105,7 @@ def _merge_cfg_from_file(cfg_filename):
 
     """Load a yaml config file and merge it into the global config."""
     with open(cfg_filename, "r") as f:
-        yaml_cfg = yaml.load(f)
+        yaml_cfg = yaml.load(f, Loader=yaml.FullLoader)
     if yaml_cfg is not None:
         _merge_a_into_b(AttrDict(yaml_cfg), cfg)
 
