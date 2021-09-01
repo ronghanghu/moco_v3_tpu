@@ -178,6 +178,7 @@ class VisionTransformer(nn.Module):
         norm_layer=None,
         act_layer=None,
         weight_init="",
+        use_global_avg_pool=False,
     ):
         """
         Args:
@@ -207,6 +208,7 @@ class VisionTransformer(nn.Module):
         self.num_tokens = 2 if distilled else 1
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
+        self.use_global_avg_pool = use_global_avg_pool
 
         self.patch_embed = embed_layer(
             img_size=img_size,
@@ -244,7 +246,11 @@ class VisionTransformer(nn.Module):
                 for i in range(depth)
             ]
         )
-        self.norm = norm_layer(embed_dim)
+        if not self.use_global_avg_pool:
+            self.norm = norm_layer(embed_dim)
+        else:
+            print("using global average pooling in ViT")
+            self.norm = nn.Identity()
 
         # Representation layer
         if representation_size and not distilled:
@@ -321,7 +327,28 @@ class VisionTransformer(nn.Module):
                 else nn.Identity()
             )
 
+    def forward_feature_map(self, x, norm=False):
+        x = self.patch_embed(x)
+        cls_token = self.cls_token.expand(
+            x.shape[0], -1, -1
+        )  # stole cls_tokens impl from Phil Wang, thanks
+        if self.dist_token is None:
+            x = torch.cat((cls_token, x), dim=1)
+        else:
+            x = torch.cat(
+                (cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1
+            )
+        x = self.pos_drop(x + self.pos_embed)
+        x = self.blocks(x)
+        if norm:
+            x = self.norm(x)
+        return x[:, 1:] if self.dist_token is None else x[:, 2:]
+
     def forward_features(self, x):
+        if self.use_global_avg_pool:
+            feature_map = self.forward_feature_map(x, norm=False)
+            return torch.mean(feature_map, dim=-1)
+
         x = self.patch_embed(x)
         cls_token = self.cls_token.expand(
             x.shape[0], -1, -1
