@@ -271,11 +271,11 @@ def eval_on_val(val_loader, model, scaler, device):
 
 
 def main(device_id, configuration):
-    config.cfg = configuration
-    distributed_init(configuration, device_id)
-    setup_logging(configuration, "linear_eval_vit")
+    config.cfg.update(configuration)
+    distributed_init(config.cfg, device_id)
+    setup_logging(config.cfg, "linear_eval_vit")
     global cfg
-    cfg = configuration
+    cfg = config.cfg
 
     synchronize()
     master_print(f"\nconfig:\n{pprint.pformat(cfg)}\n")
