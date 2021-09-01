@@ -1,10 +1,10 @@
 from itertools import chain
 
-import timm
 import torch
 from torch import nn
 
 from distributed import is_xla
+import vision_transformer
 from xla_sync_bn import XLASyncBNTrainModeOnly
 
 
@@ -62,7 +62,7 @@ class SimCLRViTModel(nn.Module):
         self, vit_model_class, vit_pos_embed_type, freeze_patch_embed, simclr_embed_dim
     ):
         super().__init__()
-        vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk = getattr(vision_transformer, vit_model_class)()
         vit_trunk.head = nn.Identity()  # remove the classifier layer
         init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
         if freeze_patch_embed:
@@ -85,7 +85,7 @@ class MoCoV3ViTModel(nn.Module):
         self, vit_model_class, vit_pos_embed_type, freeze_patch_embed, mocov3_embed_dim
     ):
         super().__init__()
-        vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk = getattr(vision_transformer, vit_model_class)()
         vit_trunk.head = nn.Identity()  # remove the classifier layer
         init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
         if freeze_patch_embed:
@@ -99,7 +99,7 @@ class MoCoV3ViTModel(nn.Module):
         self.pred_head = PredictionHead(mocov3_embed_dim, mocov3_embed_dim)
 
         # a momentum copy of the trunk and the projection head
-        vit_trunk_m = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk_m = getattr(vision_transformer, vit_model_class)()
         vit_trunk_m.head = nn.Identity()  # remove the classifier layer
         init_vit_and_pos_embedding(vit_trunk_m, vit_pos_embed_type)
         self.trunk_m = vit_trunk_m
@@ -146,7 +146,7 @@ class MoCoV3ViTModel(nn.Module):
 class LinearEvalViTModel(nn.Module):
     def __init__(self, vit_model_class, vit_pos_embed_type, num_classes):
         super().__init__()
-        vit_trunk = getattr(timm.models.vision_transformer, vit_model_class)()
+        vit_trunk = getattr(vision_transformer, vit_model_class)()
         vit_trunk.head = nn.Identity()  # remove the classifier layer
         init_vit_and_pos_embedding(vit_trunk, vit_pos_embed_type)
         # freezing the trunk for linear evaluation
