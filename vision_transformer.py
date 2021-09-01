@@ -249,7 +249,6 @@ class VisionTransformer(nn.Module):
         if not self.use_global_avg_pool:
             self.norm = norm_layer(embed_dim)
         else:
-            print("using global average pooling in ViT")
             self.norm = nn.Identity()
 
         # Representation layer
@@ -347,7 +346,7 @@ class VisionTransformer(nn.Module):
     def forward_features(self, x):
         if self.use_global_avg_pool:
             feature_map = self.forward_feature_map(x, norm=False)
-            return torch.mean(feature_map, dim=-1)
+            return torch.mean(feature_map, dim=1)
 
         x = self.patch_embed(x)
         cls_token = self.cls_token.expand(

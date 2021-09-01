@@ -100,7 +100,7 @@ class MoCoV3ViTModel(nn.Module):
         self.pred_head = PredictionHead(mocov3_embed_dim, mocov3_embed_dim)
 
         # a momentum copy of the trunk and the projection head
-        vit_trunk_m = getattr(vision_transformer, vit_model_class)()
+        vit_trunk_m = getattr(vision_transformer, vit_model_class)(**cfg.vit)
         vit_trunk_m.head = nn.Identity()  # remove the classifier layer
         init_vit_and_pos_embedding(vit_trunk_m, vit_pos_embed_type)
         self.trunk_m = vit_trunk_m
