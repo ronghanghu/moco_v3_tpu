@@ -173,8 +173,9 @@ class LinearEvalViTModel(nn.Module):
             # reset the last ViT LN layer's weight and bias to ones and zeros
             # otherwise their scales could be too large if they are learned with
             # vision SSL heads that involve BN in them.
-            pretrained_ckpt["norm.weight"][...] = 1
-            pretrained_ckpt["norm.bias"][...] = 0
+            if "norm.weight" in pretrained_ckpt and "norm.bias" in pretrained_ckpt:
+                pretrained_ckpt["norm.weight"][...] = 1
+                pretrained_ckpt["norm.bias"][...] = 0
 
         self.trunk.load_state_dict(pretrained_ckpt)
 
