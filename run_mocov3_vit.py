@@ -225,7 +225,7 @@ def train():
                 reduced_loss = reduce_tensor(loss, average=True).item()
                 smoothed_loss.update(reduced_loss, batch_size=cfg.batch_size)
                 master_print(
-                    f"epoch {epoch} step {(step + 1)}, lr: {lr:.4f}, "
+                    f"epoch {epoch} step {(step + 1)}, lr: {lr:.6f}, "
                     f"loss: {reduced_loss:.4f}, "
                     f"loss (avg): {smoothed_loss.avg:.4f}, "
                     f"loss (median): {smoothed_loss.median:.4f}"
