@@ -66,7 +66,7 @@ cfg.linear_eval.lr = 4e-2
 cfg.linear_eval.weight_decay = 0
 cfg.linear_eval.momentum = 0.9
 cfg.linear_eval.num_epochs = 100
-cfg.linear_eval.ckpt_epoch_interval = 20
+cfg.linear_eval.ckpt_epoch_interval = 100
 cfg.linear_eval.test_epoch_interval = 10
 
 # --------------------------------------------------------------------------- #
