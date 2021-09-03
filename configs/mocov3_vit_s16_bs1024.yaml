@@ -1,0 +1,5 @@
+batch_size: 1024
+lr: 6e-4  # this lr is already scaled by batch size
+weight_decay: 0.1
+vit_model_class: vit_small_patch16_224
+ckpt_prefix: vit_s16
