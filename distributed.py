@@ -238,6 +238,8 @@ def setup_logging(cfg, logging_name):
     if is_master():
         logger = logging.getLogger(logging_name)
         logger.setLevel(logging.INFO)
+        logger.handlers = []
+        logger.propagate = False
         os.makedirs(cfg.ckpt_dir, exist_ok=True)
         fh = logging.FileHandler(os.path.join(cfg.ckpt_dir, f"{logging_name}.log"))
         fh.setLevel(logging.INFO)
