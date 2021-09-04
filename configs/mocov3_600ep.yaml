@@ -1,0 +1,5 @@
+batch_size: 4096
+lr: 2.4e-3  # this lr is already scaled by batch size
+weight_decay: 0.1
+num_epochs: 600
+ckpt_epoch_interval: 30
