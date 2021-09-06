@@ -63,6 +63,7 @@ default_cfgs = {
         url="https://storage.googleapis.com/vit_models/augreg/"
         "S_16-i21k-300ep-lr_0.001-aug_light1-wd_0.03-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.03-res_224.npz"
     ),
+    "vit_small_12heads_patch16_224": _cfg(),
     "vit_base_patch16_224": _cfg(
         url="https://storage.googleapis.com/vit_models/augreg/"
         "B_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.01-res_224.npz"
@@ -623,6 +624,17 @@ def vit_small_patch16_224(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, **kwargs)
     model = _create_vision_transformer(
         "vit_small_patch16_224", pretrained=pretrained, **model_kwargs
+    )
+    return model
+
+
+@register_model
+def vit_small_12heads_patch16_224(pretrained=False, **kwargs):
+    """ MoCo v3's ViT-Small (ViT-S/16)
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=12, **kwargs)
+    model = _create_vision_transformer(
+        "vit_small_12heads_patch16_224", pretrained=pretrained, **model_kwargs
     )
     return model
 

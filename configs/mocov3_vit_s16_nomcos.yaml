@@ -1,0 +1,6 @@
+batch_size: 4096
+lr: 2.4e-3  # this lr is already scaled by batch size
+weight_decay: 0.1
+vit_model_class: vit_small_patch16_224
+ckpt_prefix: vit_s16
+mocov3_use_cosine_momentum: false
