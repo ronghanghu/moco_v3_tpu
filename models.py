@@ -162,13 +162,21 @@ class LinearEvalViTModel(nn.Module):
         pretrained_ckpt = torch.load(pretrained_ckpt_path, map_location="cpu")
         if "model" in pretrained_ckpt:
             pretrained_ckpt = pretrained_ckpt["model"]
-        keys = list(pretrained_ckpt)
-        for k in keys:
-            param = pretrained_ckpt.pop(k)
-            # keep all the trunk parameters (remove module. for DDP checkpoints)
-            if k.startswith("module.trunk.") or k.startswith("trunk."):
-                new_key = k.replace("module.trunk.", "").replace("trunk.", "")
-                pretrained_ckpt[new_key] = param
+        if not cfg.linear_eval.load_deit_ckpt:
+            # convert our MoCo checkpoint by stripping "module.trunk." or "trunk." keys
+            keys = list(pretrained_ckpt)
+            for k in keys:
+                param = pretrained_ckpt.pop(k)
+                # keep all the trunk parameters (remove module. for DDP checkpoints)
+                if k.startswith("module.trunk.") or k.startswith("trunk."):
+                    new_key = k.replace("module.trunk.", "").replace("trunk.", "")
+                    pretrained_ckpt[new_key] = param
+        else:
+            # for DeiT-format checkpoint, remove the "head.*" params
+            keys = list(pretrained_ckpt)
+            for k in keys:
+                if k.startswith("head."):
+                    param = pretrained_ckpt.pop(k)
         if reset_last_ln:
             # reset the last ViT LN layer's weight and bias to ones and zeros
             # otherwise their scales could be too large if they are learned with

@@ -59,6 +59,7 @@ cfg.warmup_epochs = 40
 # --------------------------------------------------------------------------- #
 cfg.linear_eval = AttrDict()
 cfg.linear_eval.pretrained_ckpt_path = "please-specify-the-pretrained-checkpoint"
+cfg.linear_eval.load_deit_ckpt = False
 cfg.linear_eval.reset_last_ln = True
 cfg.linear_eval.num_classes = 1000
 cfg.linear_eval.batch_size = 1024
