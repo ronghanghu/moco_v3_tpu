@@ -227,8 +227,9 @@ def infer_init_method(cfg):
             cfg.world_size = torch.cuda.device_count()
             # cfg.rank and cfg.device_id will be filled after spawning
             cfg.no_spawn = False
+            cfg.init_method = "env://"
             os.environ["MASTER_ADDR"] = "localhost"
-            os.environ["MASTER_PORT"] = cfg.port
+            os.environ["MASTER_PORT"] = str(cfg.port)
 
 
 def setup_logging(cfg, logging_name):
