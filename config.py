@@ -10,6 +10,7 @@ cfg = AttrDict()
 # general options
 # --------------------------------------------------------------------------- #
 cfg.device = "cuda"  # "xla" or "cuda"
+cfg.tpu_devices_per_node = 8  # 8 devices for TPU v3; 4 devices for TPU v4
 cfg.log_step_interval = 100
 cfg.ckpt_epoch_interval = 15
 cfg.ckpt_dir = "./save"  # make sure it can be accessed from all nodes

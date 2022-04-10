@@ -291,8 +291,7 @@ if __name__ == "__main__":
     config.cfg = config.build_cfg_from_argparse()
 
     if is_xla():
-        tpu_cores_per_node = 8
-        xmp.spawn(main, args=(config.cfg,), nprocs=tpu_cores_per_node)
+        xmp.spawn(main, args=(config.cfg,), nprocs=config.cfg.tpu_devices_per_node)
     else:
         infer_init_method(config.cfg)
         if config.cfg.no_spawn:
