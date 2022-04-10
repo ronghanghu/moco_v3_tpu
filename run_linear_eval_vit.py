@@ -12,6 +12,7 @@ from distributed import (
     get_world_size,
     get_rank,
     is_xla,
+    is_master,
     broadcast_xla_master_model_param,
     infer_init_method,
     distributed_init,
@@ -123,10 +124,14 @@ def train():
         num_classes=cfg.linear_eval.num_classes,
     )
     master_print(f"linear evaluation for: {cfg.linear_eval.pretrained_ckpt_path}")
-    model.load_from_pretrained_checkpoint(
-        cfg.linear_eval.pretrained_ckpt_path,
-        reset_last_ln=cfg.linear_eval.reset_last_ln,
-    )
+    if is_master():
+        # Only load the pretrained checkpoint on the master rank (in case it's only
+        # on the master node's filesystem). It will be broadcasted to other ranks in
+        # `broadcast_xla_master_model_param` or `DistributedDataParallel` below.
+        model.load_from_pretrained_checkpoint(
+            cfg.linear_eval.pretrained_ckpt_path,
+            reset_last_ln=cfg.linear_eval.reset_last_ln,
+        )
     if is_xla():
         device = xm.xla_device()
         train_loader = pl.MpDeviceLoader(train_loader, device)
